@@ -1,55 +1,55 @@
 const express = require('express');
+const helmet = require('helmet');
 const { MongoClient } = require('mongodb');
+const routes = require('./src/routes');
+const { applyFixture } = require('./src/db');
 
-const app = express();
 const port = 3000;
+const app = express();
+app.use(helmet());
+app.use(express.json());
+
+const isDev = process.env.NODE_ENV === 'development';
 
 // DB.
 // todo: setup cluster
 // fixme: Could use a proper role-based access: agents, users.
-const client = new MongoClient('mongodb://localhost:27017');
-const db = () => client.db('app');
-
+const dbUser = process.env.DB_USERNAME;
+const dbPass = process.env.DB_PASSWORD;
+const dbName = process.env.DB_NAME || 'app';
+// todo: configure and use ssl=true
+// todo: use a non-root user for access, allow access only to the app db
+const client = new MongoClient(`mongodb://${dbUser}:${dbPass}@mongo:27017/?authSource=admin&maxPoolSize=10`, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+});
 
 // todo: use socket.io for Websocket support
-// Routes.
-
-// Not sure what is supposed to be an authentication method of user,
-// so I use a phone number that is naturally must be available for each request.
-
-/**
- * OTP validation.
- */
-app.post('/user/otp', (req, res) => {
-  res.send('OTP validation');
-});
-
-/**
- * Pairing code validation.
- */
-app.post('/user/pair', (req, res) => {
-  res.send('pairing validation');
-});
-
-/**
- * Reset pairing process.
- * Accessible ONLY by a customer agent.
- */
-app.post('/user/reset', (req, res) => {
-    res.send('resetting process');
-});
-
-/**
- * Unlock command.
- */
-app.post('/vehicle/:vin/unlock', (req, res) => {
-  res.send('unlock vehicle!');
-});
-
 // Start.
 (async () => {
-  await client.connect();
-  console.log('Connected to DB.');
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    console.log('Connected to DB.');
 
-  app.listen(port, () => console.log(`Listening on ${port}`));
+    // Check fixtures in dev env.
+    console.log('Applying fixtures?', isDev ? 'yes' : 'no');
+    if (isDev) {
+      await applyFixture(db);
+    }
+
+    // Configure routes.
+    routes(app, db, client);
+  } catch (err) {
+    console.log(err.stack);
+    return;
+  }
+
+  const cleanup = () => {
+    client.close();
+  };
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+
+  app.listen(port, () => console.log(`Listening on ${port}`, { env: process.env.NODE_ENV }));
 })();

@@ -5,8 +5,12 @@ services:
   mongo:
     image: mongo
     restart: always
+    ports:
+      - 27017:27017
     volumes:
       - dbvolume1:/data/db
+    networks:
+      - dbnetwork
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: example
@@ -14,10 +18,19 @@ services:
   app:
     build: .
     ports:
-      - 3000:3000
+      - 8080:3000
+    volumes:
+      - .:/app
+    networks:
+      - dbnetwork
     environment:
       DB_USERNAME: root
       DB_PASSWORD: example
+      DB_NAME: app
+      NODE_ENV: production
 
 volumes:
   dbvolume1: {}
+
+networks:
+  dbnetwork: {}
