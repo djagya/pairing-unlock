@@ -15,8 +15,11 @@ const isCodeValid = (saved, code, expiration) => saved && saved.code
   && (!expiration || (Date.now() - new Date(saved.createdAt).getTime()) / 1000 < expiration);
 
 module.exports = function (app, db, client) {
-  // Not sure what is supposed to be an authentication method of user,
-  // so I use a phone number that is naturally must be available for each request.
+  // Not sure what is supposed to be an authentication/identification method of user,
+  // so I use a phone number that is naturally must be available for every request.
+
+  // todo: the given information is not enough to decide whether a separate "vehicles" collection is required,
+  // where pairing code, unlock status would be stored. For now everything is stored in users collection.
   const users = db.collection('users');
 
   const userNotFound = (res, phone) => res.status(404).json({ error: `User with phone number ${phone} not found` });
@@ -165,11 +168,40 @@ module.exports = function (app, db, client) {
   });
 
   /**
-   * Reset pairing process.
+   * Reset pairing process:
+   * - reset OTP code
+   * - reset pairing code
+   * - reset attempt history
+   * - reset flags: paired, verified, requiresReset
    * Accessible ONLY by a customer agent.
+   * For now the simplest authentication via a static authToken is used.
+   * todo: implement a proper agent authentication
    */
-  app.post('/user/reset', (req, res) => {
-    res.send('resetting process');
+  app.post('/user/reset', async (req, res) => {
+    const { authToken, phone } = req.body;
+
+    if (!authToken || authToken !== process.env.AGENT_AUTH) {
+      return badRequest(res, 'Invalid agent authentication token');
+    }
+
+    const user = await users.findOne({ phone });
+    if (!user) {
+      return userNotFound(res, phone);
+    }
+
+    await users.updateOne({ phone }, {
+      $set: {
+        otp: {},
+        pairing: {},
+        attempts: [],
+        paired: false,
+        verified: false,
+        requiresReset: false,
+      },
+    });
+    log('User has been reset', { user });
+
+    return res.json({ message: 'User has been reset' });
   });
 
   /**

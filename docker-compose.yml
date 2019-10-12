@@ -28,6 +28,7 @@ services:
       DB_PASSWORD: example
       DB_NAME: app
       NODE_ENV: production
+      AGENT_AUTH: some_secret_token
 
 volumes:
   dbvolume1: {}
