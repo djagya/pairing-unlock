@@ -1,3 +1,5 @@
+const { applyFixture } = require('./db');
+
 const isDev = process.env.NODE_ENV === 'development';
 // There's no specified expiration time for OTP codes,
 // but it's a good security measure, so I'll consider it invalid after 5 minutes.
@@ -19,11 +21,11 @@ module.exports = function (app, db, client) {
   app.post('/user/otp', async (req, res) => {
     const { phone, otp } = req.body;
 
-    const isCodeValid = (code, savedOTP) => savedOTP && savedOTP.code
+    const isCodeValid = (savedOTP, code) => savedOTP && savedOTP.code
       // Code matches.
       && savedOTP.code === code
       // Not expired.
-      && (Date.now() - new Date(code.createdAt).getTime()) < OTP_EXPIRATION;
+      && (Date.now() - new Date(savedOTP.createdAt).getTime()) / 1000 < OTP_EXPIRATION;
 
     if (!phone) {
       return badRequest(res, 'No phone number provided');
@@ -54,12 +56,12 @@ module.exports = function (app, db, client) {
     try {
       await session.withTransaction(async () => {
         // Log an attempt.
-        await users.updateOne({ phone }, { $push: { attempts: { code: otp, createdAt: new Date() } } });
+        // await users.updateOne({ phone }, { $push: { attempts: { type: 'otp', code: otp, createdAt: new Date() } } });
         log(`Logged an attempt of OTP validation: code=${otp}, user=${phone}`);
         attemptsCount += 1;
 
         // Mark as verified if valid.
-        if (isCodeValid()) {
+        if (isCodeValid(user.otp, otp)) {
           isValid = true;
           await users.updateOne({ phone }, { $set: { verified: true } });
         }
@@ -101,6 +103,11 @@ module.exports = function (app, db, client) {
   });
 
   if (isDev) {
+    app.delete('/user', async (req, res) => {
+      await users.deleteMany({});
+      await applyFixture(db);
+      res.json({ message: 'All users recreated' });
+    });
     /**
      * Code generation for a user identified by phone for development purposes.
      */
@@ -118,7 +125,7 @@ module.exports = function (app, db, client) {
         return;
       }
       log(`For user with phone ${phone} created codes: otp=${otpCode}, pairing=${pairingCode}`);
-      res.send(`Created new codes for user ${phone}`);
+      res.json({ message: `Created new codes for user ${phone}` });
     });
   }
 };
