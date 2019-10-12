@@ -1,0 +1,30 @@
+{
+  "name": "pairing-unlock",
+  "version": "1.0.0",
+  "description": "Pairing process implementation using OTP and pairing codes, supports process reset.",
+  "main": "server.js",
+  "scripts": {
+    "run": "node server.js",
+    "dev": "nodemon server.js --watch src",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/djagya/pairing-unlock.git"
+  },
+  "author": "danil zakablukovskii",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/djagya/pairing-unlock/issues"
+  },
+  "homepage": "https://github.com/djagya/pairing-unlock#readme",
+  "dependencies": {
+    "express": "^4.17.1",
+    "mongodb": "^3.3.2"
+  },
+  "devDependencies": {
+    "eslint": "^6.5.1",
+    "eslint-config-airbnb-base": "^14.0.0",
+    "eslint-plugin-import": "^2.18.2"
+  }
+}
