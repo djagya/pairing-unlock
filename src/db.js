@@ -2,6 +2,10 @@ function getUserFixture(phone, vin) {
   return {
     phone,
     vin,
+    // UUID of the phone used for OTP verification and pairing, prevent making requests from other phone.
+    // Must be stored on the client app.
+    // Optionally can be replaced by some unique permanent device id coming from the client.
+    uuid: null,
     // Was the pairing successful?
     paired: false,
     // Was the OTP code verified?
@@ -15,6 +19,8 @@ function getUserFixture(phone, vin) {
     // Contains a history of pairing attempts since last reset:
     // { type: 'otp'|'pairing', code: '123456', createdAt: Date }
     attempts: [],
+    // Is the vehicle unlocked?
+    unlocked: false,
   };
 }
 

@@ -5,8 +5,6 @@ services:
   mongo:
     image: mongo
     restart: always
-    ports:
-      - 27017:27017
     volumes:
       - dbvolume1:/data/db
     networks:
@@ -27,7 +25,9 @@ services:
       DB_USERNAME: root
       DB_PASSWORD: example
       DB_NAME: app
-      NODE_ENV: production
+      # NODE_ENV: production
+      # In development mode there are two additional endpoints: /user/codegen
+      NODE_ENV: development
       AGENT_AUTH: some_secret_token
 
 volumes:

@@ -1,3 +1,4 @@
+const uuidv1 = require('uuid/v1');
 const { applyFixture } = require('./db');
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -24,6 +25,8 @@ module.exports = function (app, db, client) {
 
   const userNotFound = (res, phone) => res.status(404).json({ error: `User with phone number ${phone} not found` });
   const badRequest = (res, msg) => res.status(400).json({ error: msg });
+  const unauthorized = (res, msg) => res.status(401).json({ error: msg });
+  const forbidden = (res, msg) => res.status(403).json({ error: msg });
   const log = (...args) => isDev && console.log(...args);
 
   const logAttempt = async (phone, type, code) => {
@@ -33,9 +36,12 @@ module.exports = function (app, db, client) {
 
   /**
    * OTP validation.
-   * Required body params:
+   * Required JSON body params:
    * - phone: the user phone to identify
    * - code: OTP code to validate
+   *
+   * Additionally returns a generated uuid that must be stored by the client app to make further requests
+   * and prevent pairing/unlocking using another phone.
    */
   app.post('/user/otp', async (req, res) => {
     const { phone, code } = req.body;
@@ -52,21 +58,22 @@ module.exports = function (app, db, client) {
     }
     log('Found user', { user });
     if (user.requiresReset) {
-      return badRequest(res, 'You must contact support to start over');
+      return forbidden(res, 'You must contact support to start over');
     }
     if (user.verified || user.paired) {
       return badRequest(res, 'You are already verified');
     }
-    if (!user.otp) {
+    if (!user.otp.code) {
       return badRequest(res, 'The OTP code is not generated. Request the system for a new code.');
     }
 
     let attemptsCount = (user.attempts || []).filter(_ => _.type === 'otp').length;
     if (attemptsCount >= OTP_ATTEMPTS_LIMIT) {
-      return badRequest(res, 'OTP verification attempts limit is reached. Contact the support to start over.');
+      return forbidden(res, 'OTP verification attempts limit is reached. Contact the support to start over.');
     }
 
     // Log an attempt and validate in a transaction.
+    const uuid = uuidv1();
     let isValid = false;
     const session = client.startSession();
     try {
@@ -78,7 +85,7 @@ module.exports = function (app, db, client) {
         // Mark as verified if valid.
         if (isCodeValid(user.otp, code, OTP_EXPIRATION)) {
           isValid = true;
-          await users.updateOne({ phone }, { $set: { verified: true } });
+          await users.updateOne({ phone }, { $set: { verified: true, uuid } });
           return;
         }
         // If invalid and limit reached, mark user as requiring reset.
@@ -93,21 +100,22 @@ module.exports = function (app, db, client) {
 
     if (!isValid) {
       return attemptsCount >= OTP_ATTEMPTS_LIMIT
-        ? badRequest(res, 'OTP verification attempts limit is reached. Contact the support to start over.')
+        ? forbidden(res, 'OTP verification attempts limit is reached. Contact the support to start over.')
         : badRequest(res, `Invalid OTP code. Remaining attempts ${OTP_ATTEMPTS_LIMIT - attemptsCount}`);
     }
 
-    return res.json({ message: 'Successfully validated' });
+    return res.json({ message: 'Successfully validated', uuid });
   });
 
   /**
    * Pairing code validation.
-   * Required body params:
+   * Required JSON body params:
    * - phone: the user phone to identify
    * - code: pairing code to validate
+   * - uuid: unique id stored on the client from the OTP verification step
    */
   app.post('/user/pair', async (req, res) => {
-    const { phone, code } = req.body;
+    const { phone, code, uuid } = req.body;
 
     if (!phone) {
       return badRequest(res, 'No phone number provided');
@@ -121,15 +129,18 @@ module.exports = function (app, db, client) {
     }
     log('Found user', { user });
     if (user.requiresReset) {
-      return badRequest(res, 'You must contact support to start over');
+      return forbidden(res, 'You must contact support to start over');
     }
-    if (!user.verified) {
-      return badRequest(res, 'You are not verified yet. Start with OTP verification.');
+    if (!user.verified || !user.uuid) {
+      return forbidden(res, 'You are not verified yet. Start with OTP verification.');
+    }
+    if (user.uuid !== uuid) {
+      return unauthorized(res, 'Invalid identification number. Do you make a request from a different device?');
     }
     if (user.paired) {
       return badRequest(res, 'You are already paired with the scooter');
     }
-    if (!user.pairing) {
+    if (!user.pairing.code) {
       return badRequest(res, 'The pairing code is not generated. Start with OTP verification.');
     }
 
@@ -181,7 +192,7 @@ module.exports = function (app, db, client) {
     const { authToken, phone } = req.body;
 
     if (!authToken || authToken !== process.env.AGENT_AUTH) {
-      return badRequest(res, 'Invalid agent authentication token');
+      return unauthorized(res, 'Invalid agent authentication token');
     }
 
     const user = await users.findOne({ phone });
@@ -191,6 +202,7 @@ module.exports = function (app, db, client) {
 
     await users.updateOne({ phone }, {
       $set: {
+        uuid: null,
         otp: {},
         pairing: {},
         attempts: [],
@@ -206,9 +218,33 @@ module.exports = function (app, db, client) {
 
   /**
    * Unlock command.
+   * Required JSON body params:
+   * - phone: the user phone to identify
+   * - uuid: unique id stored on the client from the OTP verification step
    */
-  app.post('/vehicle/:vin/unlock', (req, res) => {
-    res.send('unlock vehicle!');
+  app.post('/user/unlock', async (req, res) => {
+    const { phone, uuid } = req.body;
+
+    if (!phone) {
+      return badRequest(res, 'No phone number provided');
+    }
+    const user = await users.findOne({ phone });
+    if (!user) {
+      return userNotFound(res, phone);
+    }
+    if (!user.paired) {
+      return forbidden(res, 'You are not paired yet. Start with OTP verification.');
+    }
+    if (user.uuid !== uuid) {
+      return unauthorized(res, 'Invalid identification number. Do you make a request from a different device?');
+    }
+    if (user.unlocked) {
+      return badRequest(res, 'Vehicle is already unlocked');
+    }
+
+    await users.updateOne({ phone }, { $set: { unlocked: true } });
+
+    return res.json({ message: 'Vehicle has been unlocked' });
   });
 
   if (isDev) {
@@ -219,6 +255,10 @@ module.exports = function (app, db, client) {
     });
     /**
      * Code generation for a user identified by phone for development purposes.
+     * Creates OTP and pairing codes with the creation date set to Date.now().
+     * Required JSON body params:
+     * - otpCode: the code number
+     * - pairingCode: the code number
      */
     app.post('/user/codegen', async (req, res) => {
       const { phone, otpCode, pairingCode } = req.body;
