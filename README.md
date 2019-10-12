@@ -84,7 +84,17 @@ To make it production-ready there are multiple things remaining to be done:
 
 ## Testing
 
-Unfortunately there was no time to write tests.
+Unfortunately there was no time to write proper E2E and/or unit tests.
+
+But there is a simple test case `./test.js` that would make requests from code generation to unlock.  
+For them to work the `app` container must run in **development** env.
+
+I had no time to make a proper Docker setup, so to run them (while docker-compose is running):
+
+```bash
+$ npm install
+$ node test.js
+```
 
 ## API endpoints
 
